@@ -2,7 +2,7 @@
 
 Custom window zones for macOS. Hold Shift, drag a window, drop it in a lane.
 
-Snaplane is an Astucore app ([source](https://github.com/bcovington/snaplane)). It is inspired by the zone-snapping workflow of Microsoft PowerToys on Windows, but it is original software with its own name, code, and identity.
+Snaplane is an Astucore app ([source](https://github.com/Astucore-ai/snaplane)). It is inspired by the zone-snapping workflow of Microsoft PowerToys on Windows, but it is original software with its own name, code, and identity.
 
 ## Why not “FancyZones”?
 
@@ -13,7 +13,7 @@ Snaplane is an Astucore app ([source](https://github.com/bcovington/snaplane)). 
 Requires macOS 13+ on Apple silicon (the checked-in build script targets `arm64`).
 
 ```bash
-git clone https://github.com/bcovington/snaplane.git
+git clone https://github.com/Astucore-ai/snaplane.git
 cd snaplane
 ./scripts/build.sh
 ```

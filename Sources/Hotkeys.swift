@@ -28,7 +28,6 @@ final class HotkeyCenter {
 
     @discardableResult
     private func handle(_ event: NSEvent, consume: Bool) -> Bool {
-        if EditorController.shared.isEditingCanvas { return false }
         let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let code = Int(event.keyCode)
         let settings = ZoneStore.shared.settings
@@ -36,8 +35,19 @@ final class HotkeyCenter {
         let editorCombo = flags.contains(.control) && flags.contains(.option) && flags.contains(.shift)
             && !flags.contains(.command) && code == kVK_ANSI_Grave
         if editorCombo {
+            DebugLog.write("hotkey editorCombo consume=\(consume) editingCanvas=\(EditorController.shared.isEditingCanvas)")
             DispatchQueue.main.async { EditorController.shared.toggle() }
             return true
+        }
+
+        // Canvas overlay owns arrows / Enter / Esc. Do not steal them for snap hotkeys.
+        // Esc still cancels the overlay even if the canvas window lost key focus.
+        if EditorController.shared.isEditingCanvas {
+            if code == kVK_Escape {
+                DispatchQueue.main.async { EditorController.shared.cancelCanvasIfEditing() }
+                return true
+            }
+            return false
         }
 
         let settingsCombo = flags.contains(.control) && flags.contains(.option) && flags.contains(.shift)

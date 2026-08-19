@@ -1,6 +1,18 @@
 import AppKit
 import Carbon.HIToolbox
 
+/// Borderless overlays cannot become key unless this is overridden — without it,
+/// canvas-editor keyDown never fires and Esc/Enter/arrows appear to "hang".
+final class KeyableWindow: NSWindow {
+    override var canBecomeKey: Bool { true }
+    override var canBecomeMain: Bool { true }
+}
+
+enum EditorChrome {
+    static let overlayLevel = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.assistiveTechHighWindow)))
+    static let uiLevel = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.assistiveTechHighWindow)) + 2)
+}
+
 final class EditorController: NSObject, NSWindowDelegate {
     static let shared = EditorController()
 
@@ -16,6 +28,7 @@ final class EditorController: NSObject, NSWindowDelegate {
 
     func open() {
         isOpen = true
+        NSApp.setActivationPolicy(.regular)
         previewTarget = NSScreen.main ?? Geometry.primary
         OverlayController.shared.show(
             highlighted: [],
@@ -25,6 +38,7 @@ final class EditorController: NSObject, NSWindowDelegate {
             monitorOverride: previewTarget
         )
         showPanel()
+        raisePanel()
         NSApp.activate(ignoringOtherApps: true)
     }
 
@@ -36,6 +50,14 @@ final class EditorController: NSObject, NSWindowDelegate {
         panel?.orderOut(nil)
         panel = nil
         OverlayController.shared.hide()
+        NSApp.setActivationPolicy(.accessory)
+    }
+
+    func raisePanel() {
+        guard let panel else { return }
+        panel.level = EditorChrome.uiLevel
+        panel.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
     }
 
     func windowWillClose(_ notification: Notification) {
@@ -45,8 +67,8 @@ final class EditorController: NSObject, NSWindowDelegate {
     }
 
     private func showPanel() {
-        let width: CGFloat = 520
-        let height: CGFloat = 640
+        let width: CGFloat = 640
+        let height: CGFloat = 680
         let screen = previewTarget
         let rect = NSRect(
             x: screen.visibleFrame.midX - width / 2,
@@ -56,13 +78,14 @@ final class EditorController: NSObject, NSWindowDelegate {
         )
         let panel = NSPanel(
             contentRect: rect,
-            styleMask: [.titled, .closable, .nonactivatingPanel],
+            styleMask: [.titled, .closable],
             backing: .buffered,
             defer: false
         )
         panel.title = "Snaplane Layout Editor"
         panel.isFloatingPanel = true
-        panel.level = .floating
+        panel.becomesKeyOnlyIfNeeded = false
+        panel.level = EditorChrome.uiLevel
         panel.hidesOnDeactivate = false
         panel.delegate = self
         panel.contentView = EditorView(frame: NSRect(origin: .zero, size: rect.size), controller: self)
@@ -100,6 +123,7 @@ final class EditorController: NSObject, NSWindowDelegate {
             layoutOverride: ZoneStore.shared.layout(forMonitorKey: Geometry.monitorKey(for: previewTarget)),
             monitorOverride: previewTarget
         )
+        raisePanel()
     }
 
     func createCustom(kind: LayoutKind) {
@@ -149,6 +173,10 @@ final class EditorController: NSObject, NSWindowDelegate {
             self?.refreshPreview()
         }
         canvasSession?.start()
+    }
+
+    func cancelCanvasIfEditing() {
+        canvasSession?.cancelFromOutside()
     }
 
     var targetScreen: NSScreen { previewTarget }
@@ -255,66 +283,64 @@ final class EditorView: NSView, NSTableViewDataSource, NSTableViewDelegate {
         let countLabel = makeLabel("Zones", size: 12, weight: .medium)
         let spaceLabel = makeLabel("Space around zones", size: 12, weight: .medium)
         let hotLabel = makeLabel("Hotkey", size: 12, weight: .medium)
-
-        for view in [title, hint, monitorPop, countLabel, countField, stepper, spaceLabel, spacing, hotLabel, hotkeyPop, scroll, apply, edit, del, canvas, grid, done] {
-            view.translatesAutoresizingMaskIntoConstraints = false
-            addSubview(view)
+        for label in [countLabel, spaceLabel, hotLabel] {
+            label.setContentCompressionResistancePriority(.required, for: .horizontal)
         }
+        countField.setContentHuggingPriority(.required, for: .horizontal)
+        countField.widthAnchor.constraint(equalToConstant: 44).isActive = true
+        hotkeyPop.widthAnchor.constraint(greaterThanOrEqualToConstant: 110).isActive = true
+        spacing.setContentHuggingPriority(.defaultLow, for: .horizontal)
+
+        let zonesSpacer = NSView()
+        zonesSpacer.setContentHuggingPriority(.fittingSizeCompression, for: .horizontal)
+        let zonesRow = NSStackView(views: [countLabel, countField, stepper, zonesSpacer, hotLabel, hotkeyPop])
+        zonesRow.orientation = .horizontal
+        zonesRow.alignment = .centerY
+        zonesRow.spacing = 8
+        zonesRow.setCustomSpacing(16, after: stepper)
+
+        let spaceRow = NSStackView(views: [spaceLabel, spacing])
+        spaceRow.orientation = .horizontal
+        spaceRow.alignment = .centerY
+        spaceRow.spacing = 8
+
+        let createRow = NSStackView(views: [canvas, grid])
+        createRow.orientation = .horizontal
+        createRow.alignment = .centerY
+        createRow.spacing = 8
+        createRow.distribution = .fill
+
+        let actionSpacer = NSView()
+        actionSpacer.setContentHuggingPriority(.fittingSizeCompression, for: .horizontal)
+        let actionRow = NSStackView(views: [edit, del, actionSpacer, apply, done])
+        actionRow.orientation = .horizontal
+        actionRow.alignment = .centerY
+        actionRow.spacing = 8
+
+        let stack = NSStackView(views: [title, hint, monitorPop, zonesRow, spaceRow, scroll, createRow, actionRow])
+        stack.orientation = .vertical
+        stack.alignment = .leading
+        stack.spacing = 10
+        stack.setCustomSpacing(4, after: title)
+        stack.setCustomSpacing(14, after: spaceRow)
+        stack.setCustomSpacing(14, after: scroll)
+        stack.setCustomSpacing(6, after: createRow)
+        stack.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(stack)
 
         NSLayoutConstraint.activate([
-            title.topAnchor.constraint(equalTo: topAnchor, constant: 16),
-            title.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
-            title.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            stack.topAnchor.constraint(equalTo: topAnchor, constant: 16),
+            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+            stack.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -16),
 
-            hint.topAnchor.constraint(equalTo: title.bottomAnchor, constant: 4),
-            hint.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            hint.trailingAnchor.constraint(equalTo: title.trailingAnchor),
-
-            monitorPop.topAnchor.constraint(equalTo: hint.bottomAnchor, constant: 12),
-            monitorPop.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            monitorPop.trailingAnchor.constraint(equalTo: title.trailingAnchor),
-
-            countLabel.topAnchor.constraint(equalTo: monitorPop.bottomAnchor, constant: 12),
-            countLabel.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-
-            countField.centerYAnchor.constraint(equalTo: countLabel.centerYAnchor),
-            countField.leadingAnchor.constraint(equalTo: countLabel.trailingAnchor, constant: 8),
-            countField.widthAnchor.constraint(equalToConstant: 44),
-
-            stepper.centerYAnchor.constraint(equalTo: countLabel.centerYAnchor),
-            stepper.leadingAnchor.constraint(equalTo: countField.trailingAnchor, constant: 4),
-
-            spaceLabel.centerYAnchor.constraint(equalTo: countLabel.centerYAnchor),
-            spaceLabel.leadingAnchor.constraint(equalTo: stepper.trailingAnchor, constant: 20),
-
-            spacing.centerYAnchor.constraint(equalTo: countLabel.centerYAnchor),
-            spacing.leadingAnchor.constraint(equalTo: spaceLabel.trailingAnchor, constant: 8),
-            spacing.widthAnchor.constraint(equalToConstant: 90),
-
-            hotLabel.centerYAnchor.constraint(equalTo: countLabel.centerYAnchor),
-            hotLabel.leadingAnchor.constraint(equalTo: spacing.trailingAnchor, constant: 12),
-            hotkeyPop.centerYAnchor.constraint(equalTo: countLabel.centerYAnchor),
-            hotkeyPop.leadingAnchor.constraint(equalTo: hotLabel.trailingAnchor, constant: 6),
-            hotkeyPop.trailingAnchor.constraint(lessThanOrEqualTo: title.trailingAnchor),
-
-            scroll.topAnchor.constraint(equalTo: countLabel.bottomAnchor, constant: 12),
-            scroll.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            scroll.trailingAnchor.constraint(equalTo: title.trailingAnchor),
-            scroll.bottomAnchor.constraint(equalTo: apply.topAnchor, constant: -12),
-
-            canvas.leadingAnchor.constraint(equalTo: title.leadingAnchor),
-            canvas.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -16),
-            grid.leadingAnchor.constraint(equalTo: canvas.trailingAnchor, constant: 8),
-            grid.centerYAnchor.constraint(equalTo: canvas.centerYAnchor),
-
-            done.trailingAnchor.constraint(equalTo: title.trailingAnchor),
-            done.centerYAnchor.constraint(equalTo: canvas.centerYAnchor),
-            apply.trailingAnchor.constraint(equalTo: done.leadingAnchor, constant: -8),
-            apply.centerYAnchor.constraint(equalTo: canvas.centerYAnchor),
-            del.trailingAnchor.constraint(equalTo: apply.leadingAnchor, constant: -8),
-            del.centerYAnchor.constraint(equalTo: canvas.centerYAnchor),
-            edit.trailingAnchor.constraint(equalTo: del.leadingAnchor, constant: -8),
-            edit.centerYAnchor.constraint(equalTo: canvas.centerYAnchor)
+            monitorPop.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            zonesRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            spaceRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            scroll.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            scroll.heightAnchor.constraint(greaterThanOrEqualToConstant: 280),
+            createRow.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            actionRow.widthAnchor.constraint(equalTo: stack.widthAnchor)
         ])
     }
 
@@ -329,10 +355,12 @@ final class EditorView: NSView, NSTableViewDataSource, NSTableViewDelegate {
         let hot = layout.hotkey.map { "  ⌃⌥⌘\($0)" } ?? ""
         text.stringValue = "\(mark)\(layout.name)  ·  \(layout.zones.count) zones  ·  \(layout.kind.rawValue)\(hot)"
         text.font = .systemFont(ofSize: 13)
+        text.lineBreakMode = .byTruncatingTail
         text.translatesAutoresizingMaskIntoConstraints = false
         cell.addSubview(text)
         NSLayoutConstraint.activate([
             text.leadingAnchor.constraint(equalTo: cell.leadingAnchor, constant: 8),
+            text.trailingAnchor.constraint(equalTo: cell.trailingAnchor, constant: -8),
             text.centerYAnchor.constraint(equalTo: cell.centerYAnchor)
         ])
         return cell
@@ -349,6 +377,7 @@ final class EditorView: NSView, NSTableViewDataSource, NSTableViewDelegate {
             layoutOverride: layouts[row],
             monitorOverride: controller?.targetScreen
         )
+        controller?.raisePanel()
     }
 
     @objc private func monitorChanged() {
@@ -464,6 +493,8 @@ final class CanvasEditorSession: NSObject, NSWindowDelegate {
     private let finish: (Layout?) -> Void
     private var window: NSWindow?
     private var view: CanvasEditView?
+    private var keyMonitor: Any?
+    private var finished = false
 
     init(layout: Layout, screen: NSScreen, finish: @escaping (Layout?) -> Void) {
         self.layout = layout
@@ -472,47 +503,93 @@ final class CanvasEditorSession: NSObject, NSWindowDelegate {
     }
 
     func start() {
-        let win = NSWindow(
-            contentRect: screen.frame,
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        let win = KeyableWindow(
+            contentRect: NSRect(origin: .zero, size: screen.frame.size),
             styleMask: .borderless,
             backing: .buffered,
             defer: false,
             screen: screen
         )
+        win.setFrame(screen.frame, display: true)
         win.isOpaque = false
         win.backgroundColor = .clear
-        win.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.assistiveTechHighWindow)))
-        win.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        win.level = EditorChrome.uiLevel
+        win.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
         win.hasShadow = false
+        win.ignoresMouseEvents = false
+        win.acceptsMouseMovedEvents = true
+        win.isMovable = false
         win.delegate = self
-        let view = CanvasEditView(frame: screen.frame, layout: layout, screen: screen) { [weak self] in
+        let view = CanvasEditView(
+            frame: NSRect(origin: .zero, size: screen.frame.size),
+            layout: layout,
+            screen: screen
+        ) { [weak self] in
             self?.saveAndClose()
         } cancel: { [weak self] in
             self?.cancel()
         }
         win.contentView = view
         win.makeKeyAndOrderFront(nil)
-        NSApp.activate(ignoringOtherApps: true)
+        win.makeFirstResponder(view)
         self.window = win
         self.view = view
-    }
-
-    func close() {
-        window?.orderOut(nil)
-        window = nil
-    }
-
-    private func saveAndClose() {
-        if let updated = view?.currentLayout {
-            let done = finish
-            close()
-            done(updated)
-        } else {
-            cancel()
+        installKeyMonitor()
+        DebugLog.write("canvas start makeKey isKey=\(win.isKeyWindow) canKey=\(win.canBecomeKey) first=\(String(describing: win.firstResponder)) appActive=\(NSApp.isActive)")
+        DebugLog.dumpWindows("canvas-start")
+        DispatchQueue.main.async { [weak self] in
+            self?.window?.makeKeyAndOrderFront(nil)
+            self?.window?.makeFirstResponder(self?.view)
+            NSApp.activate(ignoringOtherApps: true)
+            if let win = self?.window {
+                DebugLog.write("canvas async isKey=\(win.isKeyWindow) first=\(String(describing: win.firstResponder)) appActive=\(NSApp.isActive)")
+            }
+            DebugLog.dumpWindows("canvas-async")
         }
     }
 
+    func close() {
+        removeKeyMonitor()
+        window?.orderOut(nil)
+        window = nil
+        view = nil
+    }
+
+    private func installKeyMonitor() {
+        removeKeyMonitor()
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
+            DebugLog.write("localMonitor keyCode=\(event.keyCode) chars=\(event.charactersIgnoringModifiers ?? "") flags=\(event.modifierFlags.rawValue) isKey=\(self?.window?.isKeyWindow ?? false)")
+            if self?.view?.handleKey(event) == true {
+                DebugLog.write("localMonitor consumed keyCode=\(event.keyCode)")
+                return nil
+            }
+            return event
+        }
+    }
+
+    private func removeKeyMonitor() {
+        if let keyMonitor {
+            NSEvent.removeMonitor(keyMonitor)
+        }
+        keyMonitor = nil
+    }
+
+    private func saveAndClose() {
+        guard finished == false else { return }
+        finished = true
+        let updated = view?.currentLayout
+        let done = finish
+        close()
+        done(updated)
+    }
+
+    func cancelFromOutside() { cancel() }
+
     private func cancel() {
+        guard finished == false else { return }
+        finished = true
         let done = finish
         close()
         done(nil)
@@ -528,6 +605,9 @@ final class CanvasEditView: NSView {
     private var dragKind: DragKind = .none
     private var dragStart = NSPoint.zero
     private var startZone = RelZone(x: 0, y: 0, w: 1, h: 1)
+    private let saveButton = NSButton(title: "Save  (Enter)", target: nil, action: nil)
+    private let cancelButton = NSButton(title: "Cancel  (Esc)", target: nil, action: nil)
+    private let addButton = NSButton(title: "Add zone  (N)", target: nil, action: nil)
     var currentLayout: Layout { layout }
 
     private enum DragKind { case none, move, n, s, e, w, ne, nw, se, sw }
@@ -539,6 +619,7 @@ final class CanvasEditView: NSView {
         self.onCancel = cancel
         super.init(frame: frame)
         wantsLayer = true
+        installButtons()
     }
 
     required init?(coder: NSCoder) { fatalError() }
@@ -579,6 +660,36 @@ final class CanvasEditView: NSView {
         }
         drawChrome()
     }
+
+    private func installButtons() {
+        for button in [saveButton, cancelButton, addButton] {
+            button.bezelStyle = .rounded
+            button.setButtonType(.momentaryPushIn)
+            button.target = self
+        }
+        saveButton.action = #selector(saveTapped)
+        saveButton.keyEquivalent = "\r"
+        saveButton.contentTintColor = .controlAccentColor
+        cancelButton.action = #selector(cancelTapped)
+        cancelButton.keyEquivalent = "\u{1b}"
+        addButton.action = #selector(addTapped)
+        for button in [saveButton, cancelButton, addButton] {
+            button.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(button)
+            button.widthAnchor.constraint(greaterThanOrEqualToConstant: 140).isActive = true
+            button.heightAnchor.constraint(equalToConstant: 32).isActive = true
+            button.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -36).isActive = true
+        }
+        NSLayoutConstraint.activate([
+            cancelButton.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 40),
+            addButton.centerXAnchor.constraint(equalTo: centerXAnchor),
+            saveButton.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -40)
+        ])
+    }
+
+    @objc private func saveTapped() { onSave() }
+    @objc private func cancelTapped() { onCancel() }
+    @objc private func addTapped() { addZone() }
 
     override func mouseDown(with event: NSEvent) {
         let p = convert(event.locationInWindow, from: nil)
@@ -646,22 +757,53 @@ final class CanvasEditView: NSView {
     }
 
     override func keyDown(with event: NSEvent) {
-        let flags = event.modifierFlags
+        if handleKey(event) { return }
+        super.keyDown(with: event)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if handleKey(event) { return true }
+        return super.performKeyEquivalent(with: event)
+    }
+
+    @discardableResult
+    func handleKey(_ event: NSEvent) -> Bool {
+        let flags = event.modifierFlags.intersection(.deviceIndependentFlagsMask)
         let step: Double = flags.contains(.control) ? 0.002 : 0.01
-        if event.keyCode == UInt16(kVK_Escape) { onCancel(); return }
-        if event.keyCode == UInt16(kVK_Return) || event.keyCode == UInt16(kVK_ANSI_S) && flags.contains(.command) {
-            onSave(); return
+        let code = Int(event.keyCode)
+        DebugLog.write("handleKey code=\(code) chars=\(event.charactersIgnoringModifiers ?? "") winKey=\(window?.isKeyWindow ?? false) first=\(String(describing: window?.firstResponder))")
+        if code == kVK_Escape {
+            onCancel()
+            return true
         }
-        if event.charactersIgnoringModifiers == "n" || event.charactersIgnoringModifiers == "N" {
-            addZone(); return
+        if code == kVK_Return || code == kVK_ANSI_KeypadEnter {
+            onSave()
+            return true
         }
-        if event.keyCode == UInt16(kVK_Delete) || event.keyCode == UInt16(kVK_ForwardDelete) {
-            deleteSelected(); return
+        if code == kVK_ANSI_S && flags.contains(.command) {
+            onSave()
+            return true
         }
-        guard layout.zones.indices.contains(selected) else { return }
+        if code == kVK_ANSI_N {
+            addZone()
+            return true
+        }
+        if code == kVK_Delete || code == kVK_ForwardDelete {
+            deleteSelected()
+            return true
+        }
+        if code == kVK_Tab {
+            if layout.zones.isEmpty == false {
+                let delta = flags.contains(.shift) ? -1 : 1
+                selected = (selected + delta + layout.zones.count) % layout.zones.count
+                needsDisplay = true
+            }
+            return true
+        }
+        guard layout.zones.indices.contains(selected) else { return false }
         var z = layout.zones[selected]
         let resize = flags.contains(.shift)
-        switch Int(event.keyCode) {
+        switch code {
         case kVK_LeftArrow:
             if resize { z.w = max(0.04, z.w - step) } else { z.x -= step }
         case kVK_RightArrow:
@@ -671,11 +813,11 @@ final class CanvasEditView: NSView {
         case kVK_DownArrow:
             if resize { z.h += step } else { z.y += step }
         default:
-            super.keyDown(with: event)
-            return
+            return false
         }
         layout.zones[selected] = z.clamped()
         needsDisplay = true
+        return true
     }
 
     private func addZone() {
@@ -712,14 +854,15 @@ final class CanvasEditView: NSView {
     }
 
     private func drawChrome() {
-        let bar = CGRect(x: 24, y: 24, width: bounds.width - 48, height: 52)
-        NSColor.black.withAlphaComponent(0.72).setFill()
+        let bar = CGRect(x: 24, y: 24, width: bounds.width - 48, height: 72)
+        NSColor.black.withAlphaComponent(0.78).setFill()
         NSBezierPath(roundedRect: bar, xRadius: 12, yRadius: 12).fill()
-        let text = "Canvas editor  ·  drag to move  ·  handles resize  ·  N add  ·  Delete remove  ·  arrows nudge  ·  Enter save  ·  Esc cancel"
+        let text = "Drag zones to move  ·  drag handles to resize  ·  arrows nudge  ·  Shift+arrows resize  ·  Delete remove"
         let attrs: [NSAttributedString.Key: Any] = [
-            .font: NSFont.systemFont(ofSize: 13, weight: .medium),
-            .foregroundColor: NSColor.white
+            .font: NSFont.systemFont(ofSize: 12, weight: .medium),
+            .foregroundColor: NSColor.white.withAlphaComponent(0.9)
         ]
-        (text as NSString).draw(at: NSPoint(x: 40, y: 40), withAttributes: attrs)
+        let drawRect = CGRect(x: bar.minX + 16, y: bar.minY + 46, width: bar.width - 32, height: 20)
+        (text as NSString).draw(with: drawRect, options: [.usesLineFragmentOrigin, .truncatesLastVisibleLine], attributes: attrs)
     }
 }

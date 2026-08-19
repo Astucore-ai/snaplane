@@ -1,0 +1,16 @@
+name: Feature
+description: A change or addition to Snaplane
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: want
+    attributes:
+      label: What should it do
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why
+      description: The window-layout problem this solves.

@@ -96,7 +96,7 @@ final class OverlayController {
             window.backgroundColor = .clear
             window.hasShadow = false
             window.ignoresMouseEvents = true
-            window.level = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.assistiveTechHighWindow)))
+            window.level = EditorChrome.overlayLevel
             window.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
             window.animationBehavior = .none
             window.contentView = ZoneCanvasView(frame: screen.frame)

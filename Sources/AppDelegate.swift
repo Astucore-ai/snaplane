@@ -18,6 +18,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         logIdentity()
         startEngine()
+        if CommandLine.arguments.contains("--debug-canvas") {
+            DebugLog.write("launch --debug-canvas pid=\(ProcessInfo.processInfo.processIdentifier)")
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
+                DebugLog.dumpWindows("pre-canvas")
+                let screen = NSScreen.main ?? Geometry.primary
+                let current = ZoneStore.shared.layout(forMonitorKey: Geometry.monitorKey(for: screen))
+                EditorController.shared.openCanvasEditor(current)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+                    DebugLog.dumpWindows("post-canvas")
+                }
+            }
+            return
+        }
         if WindowAX.isTrusted(prompt: false) {
             if !UserDefaults.standard.bool(forKey: "FZDidShowWelcome") {
                 showWelcome()

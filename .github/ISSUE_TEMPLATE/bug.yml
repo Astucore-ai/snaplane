@@ -1,0 +1,23 @@
+name: Bug
+description: Something Snaplane should do, but does not
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: Layout, what you dragged or which hotkey, what you expected, what you got.
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+      placeholder: "15.6"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Optional. `~/Library/Logs/Snaplane.log` (and `Snaplane.debug.log` if you launched with `--debug-canvas`)
+      render: text
