@@ -1,0 +1,39 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: GitHub Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          ver="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" \
+            --title "Snaplane ${ver}" \
+            --notes "$(cat <<EOF
+          KeepAlive, crash recovery, and Developer ID / notarization support.
+
+          ## Install (supported)
+
+          \`\`\`bash
+          git clone https://github.com/Astucore-ai/snaplane.git
+          cd snaplane
+          ./scripts/build.sh
+          \`\`\`
+
+          Then enable **Snaplane** in System Settings → Privacy & Security → Accessibility.
+
+          A source build signs with a local identity unless this machine has a Developer ID Application certificate. Gatekeeper warns on un-notarized copies; that is expected for a source build.
+          EOF
+          )"

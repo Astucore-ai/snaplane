@@ -11,6 +11,7 @@ final class OverlayController {
     func hide() {
         flashWork?.cancel()
         for window in windows {
+            window.animationBehavior = .none
             window.orderOut(nil)
         }
     }
@@ -83,7 +84,7 @@ final class OverlayController {
            zip(windows, NSScreen.screens).allSatisfy({ abs($0.frame.width - $1.frame.width) < 1 }) {
             return
         }
-        for window in windows { window.orderOut(nil) }
+        dispose(windows)
         windows = NSScreen.screens.map { screen in
             let window = NSWindow(
                 contentRect: screen.frame,
@@ -101,6 +102,24 @@ final class OverlayController {
             window.animationBehavior = .none
             window.contentView = ZoneCanvasView(frame: screen.frame)
             return window
+        }
+    }
+
+    /// Releasing an NSWindow on the same turn as orderOut can crash in
+    /// `_NSWindowTransformAnimation dealloc` even when animationBehavior is none.
+    private func dispose(_ list: [NSWindow]) {
+        for window in list {
+            window.animationBehavior = .none
+            window.ignoresMouseEvents = true
+            window.orderOut(nil)
+        }
+        DispatchQueue.main.async {
+            for window in list {
+                window.animationBehavior = .none
+                window.orderOut(nil)
+                window.contentView = nil
+                window.close()
+            }
         }
     }
 }

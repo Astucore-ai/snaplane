@@ -47,8 +47,14 @@ final class EditorController: NSObject, NSWindowDelegate {
         isEditingCanvas = false
         canvasSession?.close()
         canvasSession = nil
-        panel?.orderOut(nil)
+        let dying = panel
         panel = nil
+        dying?.animationBehavior = .none
+        dying?.orderOut(nil)
+        DispatchQueue.main.async {
+            dying?.animationBehavior = .none
+            dying?.close()
+        }
         OverlayController.shared.hide()
         NSApp.setActivationPolicy(.accessory)
     }
@@ -83,6 +89,7 @@ final class EditorController: NSObject, NSWindowDelegate {
             defer: false
         )
         panel.title = "Snaplane Layout Editor"
+        panel.animationBehavior = .none
         panel.isFloatingPanel = true
         panel.becomesKeyOnlyIfNeeded = false
         panel.level = EditorChrome.uiLevel
@@ -513,6 +520,7 @@ final class CanvasEditorSession: NSObject, NSWindowDelegate {
             screen: screen
         )
         win.setFrame(screen.frame, display: true)
+        win.animationBehavior = .none
         win.isOpaque = false
         win.backgroundColor = .clear
         win.level = EditorChrome.uiLevel
@@ -552,9 +560,15 @@ final class CanvasEditorSession: NSObject, NSWindowDelegate {
 
     func close() {
         removeKeyMonitor()
-        window?.orderOut(nil)
+        let dying = window
         window = nil
         view = nil
+        dying?.animationBehavior = .none
+        dying?.orderOut(nil)
+        DispatchQueue.main.async {
+            dying?.animationBehavior = .none
+            dying?.close()
+        }
     }
 
     private func installKeyMonitor() {

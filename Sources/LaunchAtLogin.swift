@@ -4,6 +4,8 @@ enum LaunchAtLogin {
     static let label = "com.astucore.snaplane"
     static let appPath = "/Applications/Snaplane.app"
     static let binaryPath = appPath + "/Contents/MacOS/Snaplane"
+    static let helperPath = appPath + "/Contents/Resources/keep-alive.sh"
+    static let processName = "Snaplane"
 
     static var plistURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
@@ -14,12 +16,8 @@ enum LaunchAtLogin {
         if enabled { install() } else { uninstall() }
     }
 
-    /// Persist the LaunchAgent so the next login / KeepAlive path is in place.
-    /// Does not bootstrap while we are already running (that would spawn a second copy).
     static func ensureInstalled() {
-        writePlist()
-        let uid = getuid()
-        _ = run("/bin/launchctl", ["enable", "gui/\(uid)/\(label)"])
+        install()
     }
 
     static func isInstalled() -> Bool {
@@ -29,12 +27,18 @@ enum LaunchAtLogin {
     static func writePlist() {
         let logs = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs")
         try? FileManager.default.createDirectory(at: logs, withIntermediateDirectories: true)
+        let args: [String]
+        if FileManager.default.fileExists(atPath: helperPath) {
+            args = [helperPath, processName, binaryPath]
+        } else {
+            args = [binaryPath]
+        }
         let plist: [String: Any] = [
             "Label": label,
-            "ProgramArguments": ["/usr/bin/open", "-W", "-a", appPath],
+            "ProgramArguments": args,
             "RunAtLoad": true,
             "KeepAlive": true,
-            "ThrottleInterval": 2,
+            "ThrottleInterval": 3,
             "LimitLoadToSessionType": "Aqua",
             "ProcessType": "Interactive",
             "AssociatedBundleIdentifiers": ["com.astucore.snaplane"],
@@ -54,7 +58,10 @@ enum LaunchAtLogin {
         let domain = "gui/\(uid)"
         _ = run("/bin/launchctl", ["enable", "\(domain)/\(label)"])
         if !isLoaded() {
-            _ = run("/bin/launchctl", ["bootstrap", domain, plistURL.path])
+            let status = run("/bin/launchctl", ["bootstrap", domain, plistURL.path])
+            if status != 0 {
+                SLLog.line("launchctl bootstrap failed status=\(status)")
+            }
         }
     }
 
@@ -76,7 +83,7 @@ enum LaunchAtLogin {
     }
 
     @discardableResult
-    private static func run(_ launchPath: String, _ arguments: [String]) -> Int32 {
+    static func run(_ launchPath: String, _ arguments: [String]) -> Int32 {
         let task = Process()
         task.executableURL = URL(fileURLWithPath: launchPath)
         task.arguments = arguments

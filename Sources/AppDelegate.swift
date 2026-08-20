@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
@@ -6,18 +7,23 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var welcome: NSWindow?
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        CrashCatch.install()
         NSApp.setActivationPolicy(.accessory)
         NSApp.servicesProvider = self
 
         buildStatusItem()
         observe()
 
+        if !CGPreflightListenEventAccess() {
+            _ = CGRequestListenEventAccess()
+        }
         if ZoneStore.shared.settings.launchAtLogin {
             LaunchAtLogin.ensureInstalled()
         }
 
         logIdentity()
         startEngine()
+        Watchdog.shared.start()
         if CommandLine.arguments.contains("--debug-canvas") {
             DebugLog.write("launch --debug-canvas pid=\(ProcessInfo.processInfo.processIdentifier)")
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) {
@@ -57,9 +63,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationWillTerminate(_ notification: Notification) {
+        Watchdog.shared.stop()
         DragMonitor.shared.stop()
         HotkeyCenter.shared.stop()
         OverlayController.shared.hide()
+        SLLog.line("terminate")
     }
 
     private func startEngine() {
@@ -69,19 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private func logIdentity() {
-        let line = "bundle=\(Bundle.main.bundleIdentifier ?? "nil") path=\(Bundle.main.bundlePath) ax=\(WindowAX.isTrusted(prompt: false))\n"
-        let url = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/Snaplane.log")
-        if let data = line.data(using: .utf8) {
-            if FileManager.default.fileExists(atPath: url.path) {
-                if let handle = try? FileHandle(forWritingTo: url) {
-                    defer { try? handle.close() }
-                    _ = try? handle.seekToEnd()
-                    try? handle.write(contentsOf: data)
-                }
-            } else {
-                try? data.write(to: url)
-            }
-        }
+        SLLog.line("launch bundle=\(Bundle.main.bundleIdentifier ?? "nil") path=\(Bundle.main.bundlePath) ax=\(WindowAX.isTrusted(prompt: false)) listen=\(CGPreflightListenEventAccess()) agent=\(LaunchAtLogin.isLoaded())")
     }
 
     private func observe() {
@@ -175,10 +171,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         menu.addItem(login)
 
         menu.addItem(.separator())
-        let pause = NSMenuItem(title: "Stop until next login", action: #selector(stopUntilLogin), keyEquivalent: "")
-        pause.target = self
-        menu.addItem(pause)
-        let quit = NSMenuItem(title: "Quit (LaunchAgent will restart)", action: #selector(quitApp), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit", action: #selector(quitApp), keyEquivalent: "q")
         quit.target = self
         menu.addItem(quit)
 
@@ -220,7 +213,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     @objc private func quitApp() {
-        NSApp.terminate(nil)
+        LaunchAtLogin.stopUntilNextLogin()
     }
 
     @objc private func openAccessibility() {
@@ -238,6 +231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             defer: false
         )
         win.title = "Snaplane needs Accessibility"
+        win.animationBehavior = .none
         win.center()
         let view = NSView(frame: win.contentView!.bounds)
         let text = NSTextField(wrappingLabelWithString: "Snaplane needs Accessibility to move and resize windows.\n\n1. Open System Settings → Privacy & Security → Accessibility\n2. Enable Snaplane\n3. This window closes by itself once permission is granted.")
@@ -261,6 +255,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             defer: false
         )
         win.title = "Snaplane is running"
+        win.animationBehavior = .none
         win.center()
         let text = NSTextField(wrappingLabelWithString: "Snaplane lives in the menu bar and stays on after restarts.\n\n• Hold Shift and drag a window — drop it on a highlighted zone\n• ⌃⌥ arrows snap the focused window between zones\n• ⌃⌥⇧` opens the layout editor\n\nTurn off Rectangle / MacsyZones while using this, or their shortcuts will fight.")
         text.frame = NSRect(x: 20, y: 60, width: 480, height: 170)

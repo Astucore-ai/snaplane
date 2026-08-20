@@ -20,6 +20,8 @@ swiftc -swift-version 5 -O \
 
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 echo -n "APPL????" > "$APP/Contents/PkgInfo"
+cp "$ROOT/Resources/keep-alive.sh" "$APP/Contents/Resources/keep-alive.sh"
+chmod +x "$APP/Contents/Resources/keep-alive.sh"
 
 if [[ -n "$ICON_SRC" && -f "$ICON_SRC" ]]; then
   echo "Building icns from $ICON_SRC"
@@ -41,37 +43,55 @@ if [[ -f "$ROOT/Resources/AppIcon.icns" ]]; then
   cp "$ROOT/Resources/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 fi
 
-chmod +x "$ROOT/scripts/ensure-identity.sh"
-KEYCHAIN="$("$ROOT/scripts/ensure-identity.sh")"
-security unlock-keychain -p "snaplane-local-sign" "$KEYCHAIN"
+chmod +x "$ROOT/scripts/codesign-app.sh"
+"$ROOT/scripts/codesign-app.sh" "$APP"
 
-# codesign only searches default keychains unless we add ours for this command
-OLD_KEYCHAINS=("${(@f)$(security list-keychains -d user | sed 's/^ *"//; s/"$//')}")
-security list-keychains -d user -s "$KEYCHAIN" "${OLD_KEYCHAINS[@]}"
-cleanup_keychains() {
-  security list-keychains -d user -s "${OLD_KEYCHAINS[@]}" >/dev/null || true
-}
-trap cleanup_keychains EXIT
-
-sign_app() {
-  codesign --force --sign "Snaplane" --keychain "$KEYCHAIN" \
-    --identifier com.astucore.snaplane \
-    "$1"
-}
-
-sign_app "$APP"
-
-# Replace the installed app without leaving a half-written bundle
+# Stop KeepAlive first so it cannot exec the old binary while we replace the bundle.
+uid="$(id -u)"
+agent="$HOME/Library/LaunchAgents/com.astucore.snaplane.plist"
+launchctl bootout "gui/$uid/com.astucore.snaplane" 2>/dev/null || true
 if pgrep -x Snaplane >/dev/null; then
   killall Snaplane 2>/dev/null || true
-  sleep 0.3
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    pgrep -x Snaplane >/dev/null || break
+    sleep 0.1
+  done
+  killall -9 Snaplane 2>/dev/null || true
 fi
 rm -rf "$DEST"
 cp -R "$APP" "$DEST"
+chmod +x "$DEST/Contents/Resources/keep-alive.sh" 2>/dev/null || true
 xattr -dr com.apple.quarantine "$DEST" 2>/dev/null || true
-sign_app "$DEST"
+NOTARIZE=1 "$ROOT/scripts/codesign-app.sh" "$DEST"
 
 /System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "$DEST" >/dev/null 2>&1 || true
+
+cat > "$agent" <<EOF
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>AssociatedBundleIdentifiers</key>
+  <array><string>com.astucore.snaplane</string></array>
+  <key>KeepAlive</key><true/>
+  <key>Label</key><string>com.astucore.snaplane</string>
+  <key>LimitLoadToSessionType</key><string>Aqua</string>
+  <key>ProcessType</key><string>Interactive</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>$DEST/Contents/Resources/keep-alive.sh</string>
+    <string>Snaplane</string>
+    <string>$DEST/Contents/MacOS/Snaplane</string>
+  </array>
+  <key>RunAtLoad</key><true/>
+  <key>StandardErrorPath</key><string>$HOME/Library/Logs/Snaplane.err.log</string>
+  <key>StandardOutPath</key><string>$HOME/Library/Logs/Snaplane.log</string>
+  <key>ThrottleInterval</key><integer>3</integer>
+</dict>
+</plist>
+EOF
+launchctl enable "gui/$uid/com.astucore.snaplane" 2>/dev/null || true
+launchctl bootstrap "gui/$uid" "$agent"
 
 echo "Installed $DEST"
 ls -la "$DEST/Contents/MacOS/Snaplane"

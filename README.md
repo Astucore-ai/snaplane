@@ -18,9 +18,9 @@ cd snaplane
 ./scripts/build.sh
 ```
 
-That compiles a signed `Snaplane.app`, installs it to `/Applications`, and registers a LaunchAgent so it starts at login and restarts if it quits.
+That compiles a signed `Snaplane.app`, installs it to `/Applications`, and registers a LaunchAgent so it starts at login and restarts if it crashes.
 
-Then enable **Snaplane** in **System Settings → Privacy & Security → Accessibility**. macOS binds that permission to the app’s signature — toggle it off and on if a rebuild stops snapping.
+Then enable **Snaplane** in **System Settings → Privacy & Security → Accessibility**. macOS binds that permission to the **code signature**. A local self-signed build needs a one-time toggle. Rebuilds with the same **Developer ID Application** certificate keep Accessibility.
 
 ## Use
 
@@ -36,7 +36,7 @@ Then enable **Snaplane** in **System Settings → Privacy & Security → Accessi
 | Switch layout | **⌃⌥⌘ 1–5** |
 | Cycle windows in a zone | **⌃⌥ Page Up / Page Down** |
 
-The app lives in the menu bar. **Quit** is restarted by launchd on purpose. Use **Stop until next login** to actually unload it.
+The app lives in the menu bar. **Quit** unloads KeepAlive for this login. A crash still comes back.
 
 Turn off Rectangle, MacsyZones, or similar tools while Snaplane is running so their shortcuts do not collide.
 
@@ -71,7 +71,7 @@ Resources/   Info.plist, app icon
 scripts/     build.sh, ensure-identity.sh, smoke-test.swift
 ```
 
-`./scripts/build.sh [icon.png]` creates a local code-signing identity in `signing/` (gitignored) so Accessibility survives rebuilds.
+`./scripts/build.sh [icon.png]` signs the app. If a **Developer ID Application** identity is in the login keychain, that is used (hardened runtime + timestamp). If a `notarytool` keychain profile named `astucore` exists, the install is notarized and stapled. Otherwise a gitignored local identity is created in `signing/` so a source build still works without a paid Apple Developer account.
 
 ```bash
 swift scripts/smoke-test.swift

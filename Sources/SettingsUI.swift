@@ -23,6 +23,7 @@ final class SettingsWindowController: NSObject, NSWindowDelegate, NSTextFieldDel
             defer: false
         )
         win.title = "Snaplane Settings"
+        win.animationBehavior = .none
         win.delegate = self
         win.center()
         win.contentView = makeContent()

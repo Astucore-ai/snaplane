@@ -6,6 +6,7 @@ final class DragMonitor {
 
     private var tap: CFMachPort?
     private var source: CFRunLoopSource?
+    private var retryTimer: Timer?
     private var dragging = false
     private var zonesOn = false
     private var startPoint = NSPoint.zero
@@ -16,8 +17,26 @@ final class DragMonitor {
 
     private init() {}
 
+    var isTapInstalled: Bool { tap != nil }
+
     func start() {
-        stop()
+        if retryTimer == nil {
+            retryTimer = Timer.scheduledTimer(withTimeInterval: 2.0, repeats: true) { [weak self] _ in
+                self?.installTapIfPossible()
+            }
+        }
+        installTapIfPossible()
+    }
+
+    func stop() {
+        retryTimer?.invalidate()
+        retryTimer = nil
+        invalidateTap()
+        endDrag(snap: false)
+    }
+
+    private func installTapIfPossible() {
+        if tap != nil { return }
         guard WindowAX.isTrusted(prompt: false) else { return }
 
         let mask =
@@ -26,24 +45,39 @@ final class DragMonitor {
             (1 << CGEventType.leftMouseUp.rawValue) |
             (1 << CGEventType.rightMouseDown.rawValue) |
             (1 << CGEventType.otherMouseDown.rawValue) |
-            (1 << CGEventType.flagsChanged.rawValue)
+            (1 << CGEventType.flagsChanged.rawValue) |
+            (1 << CGEventType.tapDisabledByTimeout.rawValue) |
+            (1 << CGEventType.tapDisabledByUserInput.rawValue)
 
         let selfPtr = Unmanaged.passUnretained(self).toOpaque()
-        guard let tap = CGEvent.tapCreate(
+        let callback: CGEventTapCallBack = { _, type, event, refcon in
+            guard let refcon else { return Unmanaged.passUnretained(event) }
+            let monitor = Unmanaged<DragMonitor>.fromOpaque(refcon).takeUnretainedValue()
+            monitor.enqueue(type: type, event: event)
+            return Unmanaged.passUnretained(event)
+        }
+
+        // listenOnly cannot freeze the mouse if we stall. Fall back to an
+        // active tap only if Input Monitoring is missing.
+        let tap = CGEvent.tapCreate(
+            tap: .cgSessionEventTap,
+            place: .headInsertEventTap,
+            options: .listenOnly,
+            eventsOfInterest: CGEventMask(mask),
+            callback: callback,
+            userInfo: selfPtr
+        ) ?? CGEvent.tapCreate(
             tap: .cgSessionEventTap,
             place: .headInsertEventTap,
             options: .defaultTap,
             eventsOfInterest: CGEventMask(mask),
-            callback: { proxy, type, event, refcon in
-                guard let refcon = refcon else {
-                    return Unmanaged.passUnretained(event)
-                }
-                let monitor = Unmanaged<DragMonitor>.fromOpaque(refcon).takeUnretainedValue()
-                monitor.enqueue(type: type, event: event)
-                return Unmanaged.passUnretained(event)
-            },
+            callback: callback,
             userInfo: selfPtr
-        ) else { return }
+        )
+        guard let tap else {
+            SLLog.line("event tap create failed")
+            return
+        }
 
         self.tap = tap
         source = CFMachPortCreateRunLoopSource(kCFAllocatorDefault, tap, 0)
@@ -51,18 +85,19 @@ final class DragMonitor {
             CFRunLoopAddSource(CFRunLoopGetMain(), source, .commonModes)
         }
         CGEvent.tapEnable(tap: tap, enable: true)
+        SLLog.line("event tap installed")
     }
 
-    func stop() {
+    private func invalidateTap() {
         if let tap = tap {
             CGEvent.tapEnable(tap: tap, enable: false)
+            CFMachPortInvalidate(tap)
         }
         if let source = source {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), source, .commonModes)
         }
         tap = nil
         source = nil
-        endDrag(snap: false)
     }
 
     private func enqueue(type: CGEventType, event: CGEvent) {
